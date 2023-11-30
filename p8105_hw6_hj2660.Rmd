@@ -1,0 +1,11 @@
+---
+title: "p8105_hw6_hj2660"
+author: "Hyun Jin Jung"
+date: "2023-12-2"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
