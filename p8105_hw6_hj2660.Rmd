@@ -45,6 +45,8 @@ weather_df =
 Fitting regression model
 ```{r}
 fit = lm(tmax ~ tmin + prcp, data = weather_df)
+
+summary(fit)
 ```
 
 Create sample for Bootstrap
@@ -90,10 +92,10 @@ log_estimate =
 boot_results =
   inner_join(r_squared, log_estimate)
 ```
+
 The warning `NaNs produced` is triggered when the expression `log(tmin * prcp)` results in non-positive values, so I replaced those NAN values with NA using `ifelse`. Then, used `inner_join` to combine two results.
 
-
-Plot the distribution of your estimates, and describe these in words. 
+Plot the distribution of $\hat{r}^2$ and $\log(\hat{\beta}_1 * \hat{\beta}_2)$.
 ```{r}
 boot_results |> 
   ggplot(aes(x = r_squared)) + 
@@ -110,10 +112,8 @@ These density plots visually represent the distribution of the bootstrap estimat
 
 In contrast, the plot for $\log(\hat{\beta}_1 \cdot \hat{\beta}_2)$ shows a distinct left-skewness. Several rows had to be removed due to non-finite values, as indicated by the warning message `NaNs produced`. This issue arose from attempting to take the logarithm of negative values.
 
-
-
  
-The 95% confidence intervals for $\hat{r}^2$ and $\log(\hat{\beta}_1 * \hat{\beta}_2)$.
+Calculate 95% confidence intervals for $\hat{r}^2$ and $\log(\hat{\beta}_1 * \hat{\beta}_2)$.
 ```{r}
 boot_results |> 
   summarize(
@@ -124,5 +124,91 @@ boot_results |>
   ) |> 
   knitr::kable(digits = 3)
 ```
+
 We are 95% confident that the true $\hat{r}^2$ lies between 0.889 and 0.941, and we are 95% confident that the true $\log(\hat{\beta}_1 * \hat{\beta}_2)$ lies between -8.962 and -4.602.
 
+# Problem 3
+
+Import and clean data
+```{r}
+bw_df = read_csv("data/birthweight.csv") |>
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace))
+
+colSums(is.na(bw_df))
+```
+Converted numeric to factor. Then used `colSums(is.na(bw_df))` to see if there's any missing data, and there wasn't.
+
+Fitting regression model
+```{r}
+full_model = lm(bwt ~., data = bw_df)
+
+summary(full_model)
+```
+I constructed a regression model for birthweight by including all available variables as predictors. Each of these variables is considered meaningful in contributing to the variation in a child's birthweight.
+
+
+```{r}
+bw_df |> 
+  modelr::add_residuals(full_model) |> 
+  modelr::add_predictions(full_model) |> 
+  ggplot(aes(x = pred, y=resid)) + 
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  labs(x = "Fitted values", 
+       y = "Residuals", 
+       title = "Model Residuals vs. Fitted Values")
+```
+
+This plot enables the observation that the residuals scatter around 0.
+
+```{r}
+#use length at birth and gestational age as predictors (main effects only)
+model_1 = lm(bwt ~ blength + gaweeks, data = bw_df)
+
+#use head circumference, length, sex, and all interactions (including the three-way interaction) 
+model_2 = lm(bwt ~ (bhead + blength + babysex)^3, data = bw_df)
+```
+
+
+```{r}
+cv_df = crossv_mc(bw_df, 100) |>
+  mutate(
+    train = map(train, as_tibble), 
+    test = map(test, as_tibble))
+```
+Made cross-validation on the `bw_df` dataset, creating 100 random splits into training and testing sets. 
+
+Compare your model to two others:
+```{r}
+cv_df |>
+  mutate(
+    proposed_mod = map(train, \(df) lm(bwt ~., data = df)),
+    main_effect_mod = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+    interaction_mod = map(train, \(df) lm(bwt ~ bhead + blength + babysex + bhead * blength + blength* babysex + bhead* babysex + bhead * blength * babysex, data = df))
+  ) |>
+  mutate(
+    rmse_proposed = map2_dbl(proposed_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_main = map2_dbl(main_effect_mod, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_interaction = map2_dbl(interaction_mod, test, \(mod, df) rmse(model = mod, data = df)),
+  ) |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin() +
+  labs(x = "Model",
+       y = "RMSE",
+       title = "Models vs RMSE")
+```
+
+The proposed model, utilizing all predictors, achieved the lowest RMSE, signifying the most accurate predictions on the test data. The main effect model, with only birth length and gestational age as predictors, yielded less accurate predictions. The interaction model, incorporating all interactions and the three-way interaction, showed a moderately higher RMSE, indicating less accuracy compared to the full predictor set.
+
+In summary, lower RMSE values signify better predictive performance. However, it's crucial to consider the specific context of the analysis and modeling goals.
